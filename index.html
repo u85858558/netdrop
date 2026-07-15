@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NetDrop</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #8a8a8a;
+    --line: #e4e4e4;
+    --accent: #2f6fed;
+    --accent-soft: rgba(47, 111, 237, 0.08);
+    --card: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111213;
+      --fg: #e8e8e8;
+      --muted: #7d7d7d;
+      --line: #2a2b2d;
+      --accent: #5b8def;
+      --accent-soft: rgba(91, 141, 239, 0.12);
+      --card: #1a1b1d;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 40px 20px 60px;
+  }
+  h1 {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 24px;
+    letter-spacing: -0.02em;
+  }
+  h1 span { color: var(--muted); font-weight: 400; }
+
+  #addr {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: -12px 0 24px;
+    padding: 5px 10px;
+    font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--muted);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    cursor: pointer;
+    user-select: none;
+    transition: color .15s, border-color .15s;
+  }
+  #addr:hover { color: var(--accent); border-color: var(--accent); }
+  #addr .hint { font-family: inherit; font-size: 11px; opacity: .7; }
+
+  #drop {
+    border: 1.5px dashed var(--line);
+    border-radius: 12px;
+    padding: 44px 20px;
+    text-align: center;
+    color: var(--muted);
+    cursor: pointer;
+    transition: border-color .15s, background .15s, color .15s;
+    user-select: none;
+  }
+  #drop:hover, #drop.over {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  #drop strong { color: inherit; font-weight: 600; }
+
+  #uploads { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .up {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+  .up .row { display: flex; justify-content: space-between; gap: 12px; }
+  .up .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .up .pct { color: var(--muted); flex-shrink: 0; }
+  .up .bar {
+    height: 3px;
+    background: var(--line);
+    border-radius: 2px;
+    margin-top: 8px;
+    overflow: hidden;
+  }
+  .up .bar i {
+    display: block;
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width .1s linear;
+  }
+  .up.done .pct { color: var(--accent); }
+  .up.err .pct { color: #d64545; }
+
+  #files { margin-top: 32px; }
+  #files h2 {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .file {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 10px 4px;
+    border-bottom: 1px solid var(--line);
+    text-decoration: none;
+    color: var(--fg);
+  }
+  .file:hover .fname { color: var(--accent); }
+  .fname {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .fmeta {
+    color: var(--muted);
+    font-size: 13px;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  #empty { color: var(--muted); padding: 10px 4px; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<h1>NetDrop <span>— files over Wi-Fi</span></h1>
+
+<div id="addr" hidden></div>
+
+<div id="drop">
+  <strong>Drop files here</strong><br>
+  or click to choose
+</div>
+<input type="file" id="picker" multiple hidden>
+<div id="uploads"></div>
+
+<div id="files">
+  <h2>Files</h2>
+  <div id="list"><div id="empty">Nothing here yet</div></div>
+</div>
+
+<script>
+const addr = document.getElementById('addr');
+const drop = document.getElementById('drop');
+const picker = document.getElementById('picker');
+const uploads = document.getElementById('uploads');
+const list = document.getElementById('list');
+
+// --- server address (what to open from other devices) ---
+
+fetch('/api/info')
+  .then(r => r.json())
+  .then(info => {
+    if (!info.addr) return;
+    addr.innerHTML = '<span class="url"></span><span class="hint">copy</span>';
+    addr.querySelector('.url').textContent = info.addr;
+    addr.hidden = false;
+    addr.addEventListener('click', () => {
+      navigator.clipboard.writeText(info.addr).then(() => {
+        addr.querySelector('.hint').textContent = 'copied';
+        setTimeout(() => addr.querySelector('.hint').textContent = 'copy', 1500);
+      });
+    });
+  })
+  .catch(() => {});
+
+// --- file list ---
+
+function fmtSize(b) {
+  if (b < 1024) return b + ' B';
+  const u = ['KB', 'MB', 'GB', 'TB'];
+  let i = -1;
+  do { b /= 1024; i++; } while (b >= 1024 && i < u.length - 1);
+  return b.toFixed(b >= 10 ? 0 : 1) + ' ' + u[i];
+}
+
+function fmtDate(s) {
+  const d = new Date(s);
+  const today = new Date();
+  const opts = d.toDateString() === today.toDateString()
+    ? { hour: '2-digit', minute: '2-digit' }
+    : { day: 'numeric', month: 'short' };
+  return d.toLocaleString('en', opts);
+}
+
+async function refresh() {
+  try {
+    const res = await fetch('/api/files');
+    const files = await res.json();
+    list.innerHTML = '';
+    if (!files || !files.length) {
+      list.innerHTML = '<div id="empty">Nothing here yet</div>';
+      return;
+    }
+    files.sort((a, b) => new Date(b.mod) - new Date(a.mod));
+    for (const f of files) {
+      const a = document.createElement('a');
+      a.className = 'file';
+      a.href = '/files/' + encodeURIComponent(f.name);
+      a.download = f.name;
+      a.innerHTML = '<span class="fname"></span>' +
+        '<span class="fmeta">' + fmtSize(f.size) + '</span>' +
+        '<span class="fmeta">' + fmtDate(f.mod) + '</span>';
+      a.querySelector('.fname').textContent = f.name;
+      list.appendChild(a);
+    }
+  } catch (e) { /* server unreachable — keep the current list */ }
+}
+
+// --- upload ---
+
+function upload(file) {
+  const el = document.createElement('div');
+  el.className = 'up';
+  el.innerHTML = '<div class="row"><span class="name"></span><span class="pct">0%</span></div>' +
+    '<div class="bar"><i></i></div>';
+  el.querySelector('.name').textContent = file.name;
+  uploads.prepend(el);
+
+  const pct = el.querySelector('.pct');
+  const bar = el.querySelector('.bar i');
+
+  const form = new FormData();
+  form.append('file', file);
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/upload');
+  xhr.upload.onprogress = e => {
+    if (!e.lengthComputable) return;
+    const p = Math.round(e.loaded / e.total * 100);
+    pct.textContent = p + '%';
+    bar.style.width = p + '%';
+  };
+  xhr.onload = () => {
+    if (xhr.status >= 200 && xhr.status < 300) {
+      el.classList.add('done');
+      pct.textContent = 'done';
+      bar.style.width = '100%';
+      setTimeout(() => el.remove(), 2500);
+      refresh();
+    } else {
+      el.classList.add('err');
+      pct.textContent = 'error';
+    }
+  };
+  xhr.onerror = () => {
+    el.classList.add('err');
+    pct.textContent = 'error';
+  };
+  xhr.send(form);
+}
+
+function uploadAll(fileList) {
+  for (const f of fileList) upload(f);
+}
+
+// --- events ---
+
+drop.addEventListener('click', () => picker.click());
+picker.addEventListener('change', () => {
+  uploadAll(picker.files);
+  picker.value = '';
+});
+
+['dragenter', 'dragover'].forEach(ev =>
+  document.addEventListener(ev, e => {
+    e.preventDefault();
+    drop.classList.add('over');
+  }));
+['dragleave', 'drop'].forEach(ev =>
+  document.addEventListener(ev, e => {
+    e.preventDefault();
+    if (ev === 'dragleave' && e.relatedTarget !== null) return;
+    drop.classList.remove('over');
+  }));
+document.addEventListener('drop', e => {
+  if (e.dataTransfer.files.length) uploadAll(e.dataTransfer.files);
+});
+
+// paste from clipboard (Cmd+V with a screenshot on a Mac)
+document.addEventListener('paste', e => {
+  const files = [...e.clipboardData.items]
+    .filter(i => i.kind === 'file')
+    .map(i => i.getAsFile());
+  if (files.length) uploadAll(files);
+});
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
